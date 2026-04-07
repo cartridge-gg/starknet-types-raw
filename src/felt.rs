@@ -98,7 +98,8 @@ impl Felt {
         &mut self.0
     }
 
-    pub const fn to_words(&self) -> [u64; 4] {
+    /// Returns 4 big-endian u64 limbs: `[0]` is the most significant word.
+    pub const fn to_words_be(&self) -> [u64; 4] {
         [
             u64::from_be_bytes([
                 self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], self.0[6],
@@ -119,11 +120,47 @@ impl Felt {
         ]
     }
 
-    pub const fn from_words(words: [u64; 4]) -> Self {
+    /// Returns 4 little-endian u64 limbs: `[0]` is the least significant word.
+    pub const fn to_words_le(&self) -> [u64; 4] {
+        [
+            u64::from_be_bytes([
+                self.0[24], self.0[25], self.0[26], self.0[27], self.0[28], self.0[29], self.0[30],
+                self.0[31],
+            ]),
+            u64::from_be_bytes([
+                self.0[16], self.0[17], self.0[18], self.0[19], self.0[20], self.0[21], self.0[22],
+                self.0[23],
+            ]),
+            u64::from_be_bytes([
+                self.0[8], self.0[9], self.0[10], self.0[11], self.0[12], self.0[13], self.0[14],
+                self.0[15],
+            ]),
+            u64::from_be_bytes([
+                self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], self.0[6],
+                self.0[7],
+            ]),
+        ]
+    }
+
+    /// Creates a [Felt] from 4 big-endian u64 limbs: `words[0]` is the most significant.
+    pub const fn from_words_be(words: [u64; 4]) -> Self {
         let w0 = words[0].to_be_bytes();
         let w1 = words[1].to_be_bytes();
         let w2 = words[2].to_be_bytes();
         let w3 = words[3].to_be_bytes();
+        Self([
+            w0[0], w0[1], w0[2], w0[3], w0[4], w0[5], w0[6], w0[7], w1[0], w1[1], w1[2], w1[3],
+            w1[4], w1[5], w1[6], w1[7], w2[0], w2[1], w2[2], w2[3], w2[4], w2[5], w2[6], w2[7],
+            w3[0], w3[1], w3[2], w3[3], w3[4], w3[5], w3[6], w3[7],
+        ])
+    }
+
+    /// Creates a [Felt] from 4 little-endian u64 limbs: `words[0]` is the least significant.
+    pub const fn from_words_le(words: [u64; 4]) -> Self {
+        let w0 = words[3].to_be_bytes();
+        let w1 = words[2].to_be_bytes();
+        let w2 = words[1].to_be_bytes();
+        let w3 = words[0].to_be_bytes();
         Self([
             w0[0], w0[1], w0[2], w0[3], w0[4], w0[5], w0[6], w0[7], w1[0], w1[1], w1[2], w1[3],
             w1[4], w1[5], w1[6], w1[7], w2[0], w2[1], w2[2], w2[3], w2[4], w2[5], w2[6], w2[7],
@@ -357,7 +394,7 @@ impl Felt {
             return Err(FromStrError::Overflow);
         }
 
-        Ok(Felt::from_words(limbs))
+        Ok(Felt::from_words_be(limbs))
     }
 
     /// The first stage of conversion - skip leading zeros.
@@ -670,7 +707,7 @@ impl std::ops::Neg for Felt {
         }
         // p - self
         let a = MODULUS_U64;
-        let b = self.to_words();
+        let b = self.to_words_be();
 
         let (d3, borrow) = a[3].overflowing_sub(b[3]);
         let (d2, b1) = a[2].overflowing_sub(b[2]);
@@ -682,7 +719,7 @@ impl std::ops::Neg for Felt {
         let (d0, _) = a[0].overflowing_sub(b[0]);
         let (d0, _) = d0.overflowing_sub(borrow as u64);
 
-        Felt::from_words([d0, d1, d2, d3])
+        Felt::from_words_be([d0, d1, d2, d3])
     }
 }
 
@@ -699,8 +736,8 @@ impl std::ops::Add for Felt {
 
     fn add(self, rhs: Self) -> Felt {
         // Interpret as 4 big-endian u64 limbs (most significant first).
-        let a = self.to_words();
-        let b = rhs.to_words();
+        let a = self.to_words_be();
+        let b = rhs.to_words_be();
 
         // Add limbs right-to-left with carry.
         let (s3, carry) = a[3].overflowing_add(b[3]);
@@ -730,7 +767,7 @@ impl std::ops::Add for Felt {
             sum = [d0, d1, d2, d3];
         }
 
-        Felt::from_words(sum)
+        Felt::from_words_be(sum)
     }
 }
 
