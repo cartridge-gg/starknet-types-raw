@@ -98,6 +98,39 @@ impl Felt {
         &mut self.0
     }
 
+    pub const fn to_words(&self) -> [u64; 4] {
+        [
+            u64::from_be_bytes([
+                self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], self.0[6],
+                self.0[7],
+            ]),
+            u64::from_be_bytes([
+                self.0[8], self.0[9], self.0[10], self.0[11], self.0[12], self.0[13], self.0[14],
+                self.0[15],
+            ]),
+            u64::from_be_bytes([
+                self.0[16], self.0[17], self.0[18], self.0[19], self.0[20], self.0[21], self.0[22],
+                self.0[23],
+            ]),
+            u64::from_be_bytes([
+                self.0[24], self.0[25], self.0[26], self.0[27], self.0[28], self.0[29], self.0[30],
+                self.0[31],
+            ]),
+        ]
+    }
+
+    pub const fn from_words(words: [u64; 4]) -> Self {
+        let w0 = words[0].to_be_bytes();
+        let w1 = words[1].to_be_bytes();
+        let w2 = words[2].to_be_bytes();
+        let w3 = words[3].to_be_bytes();
+        Self([
+            w0[0], w0[1], w0[2], w0[3], w0[4], w0[5], w0[6], w0[7], w1[0], w1[1], w1[2], w1[3],
+            w1[4], w1[5], w1[6], w1[7], w2[0], w2[1], w2[2], w2[3], w2[4], w2[5], w2[6], w2[7],
+            w3[0], w3[1], w3[2], w3[3], w3[4], w3[5], w3[6], w3[7],
+        ])
+    }
+
     /// Creates a [Felt] from big-endian bytes.
     ///
     /// Returns [OverflowError] if not less than the field modulus.
@@ -324,7 +357,7 @@ impl Felt {
             return Err(FromStrError::Overflow);
         }
 
-        Ok(from_u64x4(&limbs))
+        Ok(Felt::from_words(limbs))
     }
 
     /// The first stage of conversion - skip leading zeros.
@@ -637,7 +670,7 @@ impl std::ops::Neg for Felt {
         }
         // p - self
         let a = MODULUS_U64;
-        let b = to_u64x4(&self.0);
+        let b = self.to_words();
 
         let (d3, borrow) = a[3].overflowing_sub(b[3]);
         let (d2, b1) = a[2].overflowing_sub(b[2]);
@@ -649,7 +682,7 @@ impl std::ops::Neg for Felt {
         let (d0, _) = a[0].overflowing_sub(b[0]);
         let (d0, _) = d0.overflowing_sub(borrow as u64);
 
-        from_u64x4(&[d0, d1, d2, d3])
+        Felt::from_words([d0, d1, d2, d3])
     }
 }
 
@@ -666,8 +699,8 @@ impl std::ops::Add for Felt {
 
     fn add(self, rhs: Self) -> Felt {
         // Interpret as 4 big-endian u64 limbs (most significant first).
-        let a = to_u64x4(&self.0);
-        let b = to_u64x4(&rhs.0);
+        let a = self.to_words();
+        let b = rhs.to_words();
 
         // Add limbs right-to-left with carry.
         let (s3, carry) = a[3].overflowing_add(b[3]);
@@ -697,36 +730,8 @@ impl std::ops::Add for Felt {
             sum = [d0, d1, d2, d3];
         }
 
-        from_u64x4(&sum)
+        Felt::from_words(sum)
     }
-}
-
-/// Big-endian `[u8; 32]` to 4 big-endian u64 limbs.
-fn to_u64x4(bytes: &[u8; 32]) -> [u64; 4] {
-    [
-        u64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        u64::from_be_bytes([
-            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-        ]),
-        u64::from_be_bytes([
-            bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
-        ]),
-        u64::from_be_bytes([
-            bytes[24], bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31],
-        ]),
-    ]
-}
-
-/// 4 big-endian u64 limbs back to `Felt`.
-fn from_u64x4(limbs: &[u64; 4]) -> Felt {
-    let mut bytes = [0u8; 32];
-    bytes[0..8].copy_from_slice(&limbs[0].to_be_bytes());
-    bytes[8..16].copy_from_slice(&limbs[1].to_be_bytes());
-    bytes[16..24].copy_from_slice(&limbs[2].to_be_bytes());
-    bytes[24..32].copy_from_slice(&limbs[3].to_be_bytes());
-    Felt(bytes)
 }
 
 /// Returns true if limbs >= MODULUS_U64 (big-endian comparison).
