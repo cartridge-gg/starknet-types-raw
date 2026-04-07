@@ -786,7 +786,7 @@ impl std::str::FromStr for Felt {
     type Err = FromStrError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("0x") || s.starts_with("0X") {
+        if s.starts_with("0x") {
             Self::from_hex(s)
         } else {
             Self::from_dec_str(s)
@@ -1348,6 +1348,129 @@ mod tests {
             const TRANSFER: Felt = Felt::selector("Transfer");
             assert_selector_matches("Transfer");
             assert_eq!(TRANSFER, Felt::selector("Transfer"));
+        }
+    }
+
+    mod from_dec_str {
+        use assert_matches::assert_matches;
+        use pretty_assertions_sorted::assert_eq;
+        use starknet_types_core::felt::Felt as SnFelt;
+
+        use super::*;
+
+        #[test]
+        fn zero() {
+            assert_eq!(Felt::from_dec_str("0").unwrap(), Felt::ZERO);
+        }
+
+        #[test]
+        fn one() {
+            assert_eq!(Felt::from_dec_str("1").unwrap(), Felt::ONE);
+        }
+
+        #[test]
+        fn small() {
+            assert_eq!(Felt::from_dec_str("255").unwrap(), Felt::from_u64(255));
+        }
+
+        #[test]
+        fn large() {
+            // 2^128
+            let s = "340282366920938463463374607431768211456";
+            let ours = Felt::from_dec_str(s).unwrap();
+            let reference = SnFelt::from_dec_str(s).unwrap();
+            assert_eq!(ours.0, reference.to_bytes_be());
+        }
+
+        #[test]
+        fn max_felt() {
+            // p - 1
+            let s = "3618502788666131213697322783095070105623107215331596699973092056135872020480";
+            let ours = Felt::from_dec_str(s).unwrap();
+            let reference = SnFelt::from_dec_str(s).unwrap();
+            assert_eq!(ours.0, reference.to_bytes_be());
+        }
+
+        #[test]
+        fn overflow_modulus() {
+            // p itself
+            let s = "3618502788666131213697322783095070105623107215331596699973092056135872020481";
+            assert_matches!(Felt::from_dec_str(s).unwrap_err(), FromStrError::Overflow);
+        }
+
+        #[test]
+        fn overflow_large() {
+            // 2^256
+            let s =
+                "115792089237316195423570985008687907853269984665640564039457584007913129639936";
+            assert_matches!(Felt::from_dec_str(s).unwrap_err(), FromStrError::Overflow);
+        }
+
+        #[test]
+        fn empty() {
+            assert_matches!(
+                Felt::from_dec_str("").unwrap_err(),
+                FromStrError::EmptyString
+            );
+        }
+
+        #[test]
+        fn invalid_char() {
+            assert_matches!(
+                Felt::from_dec_str("123a").unwrap_err(),
+                FromStrError::InvalidDigit(b'a')
+            );
+        }
+
+        #[test]
+        fn leading_zeros() {
+            assert_eq!(Felt::from_dec_str("007").unwrap(), Felt::from_u64(7));
+        }
+    }
+
+    mod from_str {
+        use pretty_assertions_sorted::assert_eq;
+        use starknet_types_core::felt::Felt as SnFelt;
+
+        use super::*;
+
+        #[test]
+        fn hex_prefix() {
+            let felt: Felt = "0xff".parse().unwrap();
+            assert_eq!(felt, Felt::from_u64(255));
+        }
+
+        #[test]
+        fn hex_prefix_upper_is_decimal_parse() {
+            // 0X prefix is not recognized as hex — treated as decimal, fails
+            assert!("0XFF".parse::<Felt>().is_err());
+        }
+
+        #[test]
+        fn decimal() {
+            let felt: Felt = "255".parse().unwrap();
+            assert_eq!(felt, Felt::from_u64(255));
+        }
+
+        #[test]
+        fn large_decimal() {
+            let s = "3618502788666131213697322783095070105623107215331596699973092056135872020480";
+            let felt: Felt = s.parse().unwrap();
+            let reference = SnFelt::from_dec_str(s).unwrap();
+            assert_eq!(felt.0, reference.to_bytes_be());
+        }
+
+        #[test]
+        fn large_hex() {
+            let s = "0x800000000000011000000000000000000000000000000000000000000000000";
+            let felt: Felt = s.parse().unwrap();
+            assert_eq!(felt, Felt::from_hex(s).unwrap());
+        }
+
+        #[test]
+        fn zero_decimal() {
+            let felt: Felt = "0".parse().unwrap();
+            assert_eq!(felt, Felt::ZERO);
         }
     }
 }

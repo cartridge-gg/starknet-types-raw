@@ -12,4 +12,5 @@ pub mod core_felt;
 #[cfg(feature = "events")]
 pub mod core_events;
 
+pub use error::{FromStrError, OverflowError, PrimitiveFromFeltError};
 pub use felt::Felt;
