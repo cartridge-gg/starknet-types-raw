@@ -40,7 +40,7 @@ impl serde::de::Visitor<'_> for FeltVisitor {
     }
 
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        Felt::from_hex_str(value).map_err(|e| E::custom(e.to_string()))
+        Felt::from_hex(value).map_err(|e| E::custom(e.to_string()))
     }
 
     fn visit_bytes<E: serde::de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn serialize_human_readable_round_trip() {
-        let original = Felt::from_hex_str("0xdeadbeef").unwrap();
+        let original = Felt::from_hex("0xdeadbeef").unwrap();
         let serialized = serde_json::to_string(&original).unwrap();
         let deserialized: Felt = serde_json::from_str(&serialized).unwrap();
         assert_eq!(original, deserialized);
@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn serialize_max_human_readable() {
         let max =
-            Felt::from_hex_str("0x800000000000011000000000000000000000000000000000000000000000000")
+            Felt::from_hex("0x800000000000011000000000000000000000000000000000000000000000000")
                 .unwrap();
         let serialized = serde_json::to_string(&max).unwrap();
         let deserialized: Felt = serde_json::from_str(&serialized).unwrap();
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn serialize_binary_round_trip() {
-        let original = Felt::from_hex_str("0xdeadbeef").unwrap();
+        let original = Felt::from_hex("0xdeadbeef").unwrap();
         let serialized =
             bincode::serde::encode_to_vec(original, bincode::config::standard()).unwrap();
         let deserialized: Felt =
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn serialize_binary_compact() {
-        let felt = Felt::from_hex_str("0xbabe").unwrap();
+        let felt = Felt::from_hex("0xbabe").unwrap();
         let serialized = bincode::serde::encode_to_vec(felt, bincode::config::standard()).unwrap();
         assert!(serialized.len() < 32);
         let deserialized: Felt =

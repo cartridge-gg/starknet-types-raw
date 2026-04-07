@@ -1,7 +1,7 @@
+use crate::keccak::keccak256;
+use num_traits::Zero;
 use std::borrow::Cow;
 use std::error::Error;
-
-use crate::keccak::keccak256;
 
 /// Starknet Field Element.
 ///
@@ -113,26 +113,6 @@ impl Felt {
         &mut self.0
     }
 
-    /// Convenience function which extends [Felt::from_be_bytes] to work with
-    /// slices.
-    pub const fn from_be_slice(bytes: &[u8]) -> Result<Self, OverflowError> {
-        if bytes.len() > 32 {
-            return Err(OverflowError);
-        }
-
-        let mut buf = [0u8; 32];
-        let mut index = 0;
-        loop {
-            if index == bytes.len() {
-                break;
-            }
-            buf[32 - bytes.len() + index] = bytes[index];
-            index += 1;
-        }
-
-        Felt::from_be_bytes(buf)
-    }
-
     /// Creates a [Felt] from big-endian bytes.
     ///
     /// Returns [OverflowError] if not less than the field modulus.
@@ -177,8 +157,34 @@ impl Felt {
     }
 
     /// Creates a Felt from a big-endian byte slice of up to 32 bytes.
-    /// Panics if slice is longer than 32 bytes.
-    pub fn from_bytes_be_slice(bytes: &[u8]) -> Self {
+    /// Returns [`OverflowError`] if the slice is longer than 32 bytes or
+    /// the value is >= the field modulus.
+    pub fn from_be_bytes_slice(bytes: &[u8]) -> Result<Self, OverflowError> {
+        if bytes.len() > 32 {
+            return Err(OverflowError);
+        }
+        let mut buf = [0u8; 32];
+        buf[32 - bytes.len()..].copy_from_slice(bytes);
+        Self::from_be_bytes(buf)
+    }
+
+    /// Creates a Felt from a little-endian byte slice of up to 32 bytes.
+    /// Returns [`OverflowError`] if the slice is longer than 32 bytes or
+    /// the value is >= the field modulus.
+    pub fn from_le_bytes_slice(bytes: &[u8]) -> Result<Self, OverflowError> {
+        if bytes.len() > 32 {
+            return Err(OverflowError);
+        }
+        let mut buf = [0u8; 32];
+        for (i, &b) in bytes.iter().enumerate() {
+            buf[31 - i] = b;
+        }
+        Self::from_be_bytes(buf)
+    }
+
+    /// Creates a Felt from a big-endian byte slice of up to 32 bytes.
+    /// Panics if slice is longer than 32 bytes. Does not check for overflow.
+    pub fn from_be_bytes_slice_unchecked(bytes: &[u8]) -> Self {
         assert!(bytes.len() <= 32, "slice too long");
         let mut buf = [0u8; 32];
         buf[32 - bytes.len()..].copy_from_slice(bytes);
@@ -186,7 +192,8 @@ impl Felt {
     }
 
     /// Creates a Felt from a little-endian byte slice of up to 32 bytes.
-    pub fn from_bytes_le_slice(bytes: &[u8]) -> Self {
+    /// Panics if slice is longer than 32 bytes. Does not check for overflow.
+    pub fn from_le_bytes_slice_unchecked(bytes: &[u8]) -> Self {
         assert!(bytes.len() <= 32, "slice too long");
         let mut buf = [0u8; 32];
         for (i, &b) in bytes.iter().enumerate() {
@@ -204,17 +211,161 @@ impl Felt {
     }
 
     pub const fn from_u64(u: u64) -> Self {
-        const_expect!(
-            Self::from_be_slice(&u.to_be_bytes()),
-            "64 bits is less than 251 bits"
-        )
+        let bytes = u.to_be_bytes();
+        Self([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, bytes[0],
+            bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
     }
 
     pub const fn from_u128(u: u128) -> Self {
+        let bytes = u.to_be_bytes();
+        Self([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15],
+        ])
+    }
+
+    pub const fn from_hex_unchecked(hex_str: &str) -> Self {
         const_expect!(
-            Self::from_be_slice(&u.to_be_bytes()),
-            "128 bits is less than 251 bits"
+            Self::from_hex(hex_str),
+            "invalid hex string or value exceeds field modulus"
         )
+    }
+
+    /// A convenience function which parses a hex string into a [Felt].
+    ///
+    /// Supports both upper and lower case hex strings, as well as an optional
+    /// "0x" prefix.
+    pub const fn from_hex(hex_str: &str) -> Result<Self, HexParseError> {
+        const fn parse_hex_digit(digit: u8) -> Result<u8, HexParseError> {
+            match digit {
+                b'0'..=b'9' => Ok(digit - b'0'),
+                b'A'..=b'F' => Ok(digit - b'A' + 10),
+                b'a'..=b'f' => Ok(digit - b'a' + 10),
+                other => Err(HexParseError::InvalidNibble(other)),
+            }
+        }
+
+        let bytes = hex_str.as_bytes();
+        let start = if bytes.len() >= 2 && bytes[0] == b'0' && bytes[1] == b'x' {
+            2
+        } else {
+            0
+        };
+        let len = bytes.len() - start;
+
+        if len > 64 {
+            return Err(HexParseError::InvalidLength {
+                max: 64,
+                actual: bytes.len(),
+            });
+        }
+
+        let mut buf = [0u8; 32];
+
+        // We want the result in big-endian so reverse iterate over each pair of
+        // nibbles. let chunks = hex_str.as_bytes().rchunks_exact(2);
+
+        // Handle a possible odd nibble remaining nibble.
+        if len % 2 == 1 {
+            let idx = len / 2;
+            buf[31 - idx] = match parse_hex_digit(bytes[start]) {
+                Ok(b) => b,
+                Err(e) => return Err(e),
+            };
+        }
+
+        let chunks = len / 2;
+        let mut chunk = 0;
+
+        while chunk < chunks {
+            let lower = match parse_hex_digit(bytes[bytes.len() - chunk * 2 - 1]) {
+                Ok(b) => b,
+                Err(e) => return Err(e),
+            };
+            let upper = match parse_hex_digit(bytes[bytes.len() - chunk * 2 - 2]) {
+                Ok(b) => b,
+                Err(e) => return Err(e),
+            };
+            buf[31 - chunk] = (upper << 4) | lower;
+            chunk += 1;
+        }
+
+        let felt = match Felt::from_be_bytes(buf) {
+            Ok(felt) => felt,
+            Err(OverflowError) => return Err(HexParseError::Overflow),
+        };
+        Ok(felt)
+    }
+
+    /// The first stage of conversion - skip leading zeros
+    fn skip_zeros(&self) -> (impl Iterator<Item = &u8>, usize, usize) {
+        // Skip all leading zero bytes
+        let it = self.0.iter().skip_while(|&&b| b == 0);
+        let num_bytes = it.clone().count();
+        let skipped = self.0.len() - num_bytes;
+        // The first high nibble can be 0
+        let start = if self.0[skipped] < 0x10 { 1 } else { 2 };
+        // Number of characters to display
+        let len = start + num_bytes * 2;
+        (it, start, len)
+    }
+
+    /// The second stage of conversion - map bytes to hex str
+    fn it_to_hex_str<'a>(
+        it: impl Iterator<Item = &'a u8>,
+        start: usize,
+        len: usize,
+        buf: &'a mut [u8],
+    ) -> &'a [u8] {
+        const LUT: [u8; 16] = *b"0123456789abcdef";
+        buf[0] = b'0';
+        // Same small lookup table is ~25% faster than hex::encode_from_slice 🤷
+        it.enumerate().for_each(|(i, &b)| {
+            let idx = b as usize;
+            let pos = start + i * 2;
+            let x = [LUT[(idx & 0xf0) >> 4], LUT[idx & 0x0f]];
+            buf[pos..pos + 2].copy_from_slice(&x);
+        });
+        buf[1] = b'x';
+        &buf[..len]
+    }
+
+    /// A convenience function which produces a "0x" prefixed hex str slice in a
+    /// given buffer `buf` from a [Felt].
+    /// Panics if `self.0.len() * 2 + 2 > buf.len()`
+    pub fn as_hex_str<'a>(&'a self, buf: &'a mut [u8]) -> &'a str {
+        let expected_buf_len = self.0.len() * 2 + 2;
+        assert!(
+            buf.len() >= expected_buf_len,
+            "buffer size is {}, expected at least {}",
+            buf.len(),
+            expected_buf_len
+        );
+
+        if !self.0.iter().any(|b| *b != 0) {
+            return "0x0";
+        }
+
+        let (it, start, len) = self.skip_zeros();
+        let res = Self::it_to_hex_str(it, start, len, buf);
+        // Unwrap is safe because `buf` holds valid UTF8 characters.
+        std::str::from_utf8(res).unwrap()
+    }
+
+    /// A convenience function which produces a "0x" prefixed hex string from a
+    /// [Felt].
+    pub fn to_hex_str(&self) -> Cow<'static, str> {
+        if !self.0.iter().any(|b| *b != 0) {
+            return Cow::from("0x0");
+        }
+        let (it, start, len) = self.skip_zeros();
+        let mut buf = vec![0u8; len];
+        Self::it_to_hex_str(it, start, len, &mut buf);
+        // Unwrap is safe as the buffer contains valid utf8
+        String::from_utf8(buf).unwrap().into()
     }
 
     /// Computes a Starknet selector from a function/event name.
@@ -580,139 +731,13 @@ impl TryFrom<Felt> for i8 {
     }
 }
 
-impl Felt {
-    /// A convenience function which parses a hex string into a [Felt].
-    ///
-    /// Supports both upper and lower case hex strings, as well as an optional
-    /// "0x" prefix.
-    pub const fn from_hex_str(hex_str: &str) -> Result<Self, HexParseError> {
-        const fn parse_hex_digit(digit: u8) -> Result<u8, HexParseError> {
-            match digit {
-                b'0'..=b'9' => Ok(digit - b'0'),
-                b'A'..=b'F' => Ok(digit - b'A' + 10),
-                b'a'..=b'f' => Ok(digit - b'a' + 10),
-                other => Err(HexParseError::InvalidNibble(other)),
-            }
-        }
-
-        let bytes = hex_str.as_bytes();
-        let start = if bytes.len() >= 2 && bytes[0] == b'0' && bytes[1] == b'x' {
-            2
-        } else {
-            0
-        };
-        let len = bytes.len() - start;
-
-        if len > 64 {
-            return Err(HexParseError::InvalidLength {
-                max: 64,
-                actual: bytes.len(),
-            });
-        }
-
-        let mut buf = [0u8; 32];
-
-        // We want the result in big-endian so reverse iterate over each pair of
-        // nibbles. let chunks = hex_str.as_bytes().rchunks_exact(2);
-
-        // Handle a possible odd nibble remaining nibble.
-        if len % 2 == 1 {
-            let idx = len / 2;
-            buf[31 - idx] = match parse_hex_digit(bytes[start]) {
-                Ok(b) => b,
-                Err(e) => return Err(e),
-            };
-        }
-
-        let chunks = len / 2;
-        let mut chunk = 0;
-
-        while chunk < chunks {
-            let lower = match parse_hex_digit(bytes[bytes.len() - chunk * 2 - 1]) {
-                Ok(b) => b,
-                Err(e) => return Err(e),
-            };
-            let upper = match parse_hex_digit(bytes[bytes.len() - chunk * 2 - 2]) {
-                Ok(b) => b,
-                Err(e) => return Err(e),
-            };
-            buf[31 - chunk] = (upper << 4) | lower;
-            chunk += 1;
-        }
-
-        let felt = match Felt::from_be_bytes(buf) {
-            Ok(felt) => felt,
-            Err(OverflowError) => return Err(HexParseError::Overflow),
-        };
-        Ok(felt)
+impl Zero for Felt {
+    fn zero() -> Self {
+        Self::ZERO
     }
 
-    /// The first stage of conversion - skip leading zeros
-    fn skip_zeros(&self) -> (impl Iterator<Item = &u8>, usize, usize) {
-        // Skip all leading zero bytes
-        let it = self.0.iter().skip_while(|&&b| b == 0);
-        let num_bytes = it.clone().count();
-        let skipped = self.0.len() - num_bytes;
-        // The first high nibble can be 0
-        let start = if self.0[skipped] < 0x10 { 1 } else { 2 };
-        // Number of characters to display
-        let len = start + num_bytes * 2;
-        (it, start, len)
-    }
-
-    /// The second stage of conversion - map bytes to hex str
-    fn it_to_hex_str<'a>(
-        it: impl Iterator<Item = &'a u8>,
-        start: usize,
-        len: usize,
-        buf: &'a mut [u8],
-    ) -> &'a [u8] {
-        const LUT: [u8; 16] = *b"0123456789abcdef";
-        buf[0] = b'0';
-        // Same small lookup table is ~25% faster than hex::encode_from_slice 🤷
-        it.enumerate().for_each(|(i, &b)| {
-            let idx = b as usize;
-            let pos = start + i * 2;
-            let x = [LUT[(idx & 0xf0) >> 4], LUT[idx & 0x0f]];
-            buf[pos..pos + 2].copy_from_slice(&x);
-        });
-        buf[1] = b'x';
-        &buf[..len]
-    }
-
-    /// A convenience function which produces a "0x" prefixed hex str slice in a
-    /// given buffer `buf` from a [Felt].
-    /// Panics if `self.0.len() * 2 + 2 > buf.len()`
-    pub fn as_hex_str<'a>(&'a self, buf: &'a mut [u8]) -> &'a str {
-        let expected_buf_len = self.0.len() * 2 + 2;
-        assert!(
-            buf.len() >= expected_buf_len,
-            "buffer size is {}, expected at least {}",
-            buf.len(),
-            expected_buf_len
-        );
-
-        if !self.0.iter().any(|b| *b != 0) {
-            return "0x0";
-        }
-
-        let (it, start, len) = self.skip_zeros();
-        let res = Self::it_to_hex_str(it, start, len, buf);
-        // Unwrap is safe because `buf` holds valid UTF8 characters.
-        std::str::from_utf8(res).unwrap()
-    }
-
-    /// A convenience function which produces a "0x" prefixed hex string from a
-    /// [Felt].
-    pub fn to_hex_str(&self) -> Cow<'static, str> {
-        if !self.0.iter().any(|b| *b != 0) {
-            return Cow::from("0x0");
-        }
-        let (it, start, len) = self.skip_zeros();
-        let mut buf = vec![0u8; len];
-        Self::it_to_hex_str(it, start, len, &mut buf);
-        // Unwrap is safe as the buffer contains valid utf8
-        String::from_utf8(buf).unwrap().into()
+    fn is_zero(&self) -> bool {
+        *self == Self::ZERO
     }
 }
 
@@ -784,26 +809,26 @@ mod tests {
 
         #[test]
         fn round_trip() {
-            let original = Felt::from_hex_str("abcdef0123456789").unwrap();
+            let original = Felt::from_hex("abcdef0123456789").unwrap();
             let bytes = original.to_be_bytes();
-            let result = Felt::from_be_slice(&bytes[..]).unwrap();
+            let result = Felt::from_be_bytes_slice(&bytes[..]).unwrap();
 
             assert_eq!(result, original);
         }
 
         #[test]
         fn too_long() {
-            let original = Felt::from_hex_str("abcdef0123456789").unwrap();
+            let original = Felt::from_hex("abcdef0123456789").unwrap();
             let mut bytes = original.to_be_bytes().to_vec();
             bytes.push(0);
-            Felt::from_be_slice(&bytes[..]).unwrap_err();
+            Felt::from_be_bytes_slice(&bytes[..]).unwrap_err();
         }
 
         #[test]
         fn short_slice() {
-            let original = Felt::from_hex_str("abcdef0123456789").unwrap();
+            let original = Felt::from_hex("abcdef0123456789").unwrap();
             let bytes = original.to_be_bytes();
-            let result = Felt::from_be_slice(&bytes[24..]);
+            let result = Felt::from_be_bytes_slice(&bytes[24..]);
 
             assert_eq!(result, Ok(original));
         }
@@ -812,12 +837,15 @@ mod tests {
         fn max() {
             let mut max_val = MODULUS_U8;
             max_val[31] -= 1;
-            Felt::from_be_slice(&max_val[..]).unwrap();
+            Felt::from_be_bytes_slice(&max_val[..]).unwrap();
         }
 
         #[test]
         fn overflow() {
-            assert_eq!(Felt::from_be_slice(&MODULUS_U8[..]), Err(OverflowError));
+            assert_eq!(
+                Felt::from_be_bytes_slice(&MODULUS_U8[..]),
+                Err(OverflowError)
+            );
         }
     }
 
@@ -829,7 +857,7 @@ mod tests {
         #[test]
         fn debug() {
             let hex_str = "1234567890abcdef000edcba0987654321";
-            let felt = Felt::from_hex_str(hex_str).unwrap();
+            let felt = Felt::from_hex(hex_str).unwrap();
             let result = format!("{felt:?}");
 
             let expected = format!("0x{felt}");
@@ -840,7 +868,7 @@ mod tests {
         #[test]
         fn fmt() {
             let hex_str = "1234567890abcdef000edcba0987654321";
-            let starkhash = Felt::from_hex_str(hex_str).unwrap();
+            let starkhash = Felt::from_hex(hex_str).unwrap();
             let result = format!("{starkhash:x}");
 
             // We don't really care which casing is used by fmt.
@@ -850,7 +878,7 @@ mod tests {
         #[test]
         fn lower_hex() {
             let hex_str = "1234567890abcdef000edcba0987654321";
-            let starkhash = Felt::from_hex_str(hex_str).unwrap();
+            let starkhash = Felt::from_hex(hex_str).unwrap();
             let result = format!("{starkhash:x}");
 
             assert_eq!(result, hex_str.to_lowercase());
@@ -859,7 +887,7 @@ mod tests {
         #[test]
         fn upper_hex() {
             let hex_str = "1234567890abcdef000edcba0987654321";
-            let starkhash = Felt::from_hex_str(hex_str).unwrap();
+            let starkhash = Felt::from_hex(hex_str).unwrap();
             let result = format!("{starkhash:X}");
 
             assert_eq!(result, hex_str.to_uppercase());
@@ -894,39 +922,39 @@ mod tests {
         #[test]
         fn simple() {
             let (test_str, expected) = test_data();
-            let uut = Felt::from_hex_str(test_str).unwrap();
+            let uut = Felt::from_hex(test_str).unwrap();
             assert_eq!(uut, expected);
         }
 
         #[test]
         fn prefix() {
             let (test_str, expected) = test_data();
-            let uut = Felt::from_hex_str(&format!("0x{test_str}")).unwrap();
+            let uut = Felt::from_hex(&format!("0x{test_str}")).unwrap();
             assert_eq!(uut, expected);
         }
 
         #[test]
         fn leading_zeros() {
             let (test_str, expected) = test_data();
-            let uut = Felt::from_hex_str(&format!("000000000{test_str}")).unwrap();
+            let uut = Felt::from_hex(&format!("000000000{test_str}")).unwrap();
             assert_eq!(uut, expected);
         }
 
         #[test]
         fn prefix_and_leading_zeros() {
             let (test_str, expected) = test_data();
-            let uut = Felt::from_hex_str(&format!("0x000000000{test_str}")).unwrap();
+            let uut = Felt::from_hex(&format!("0x000000000{test_str}")).unwrap();
             assert_eq!(uut, expected);
         }
 
         #[test]
         fn invalid_nibble() {
-            assert_matches!(Felt::from_hex_str("0x123z").unwrap_err(), HexParseError::InvalidNibble(n) => assert_eq!(n, b'z'));
+            assert_matches!(Felt::from_hex("0x123z").unwrap_err(), HexParseError::InvalidNibble(n) => assert_eq!(n, b'z'));
         }
 
         #[test]
         fn invalid_len() {
-            assert_matches!(Felt::from_hex_str(&"1".repeat(65)).unwrap_err(), HexParseError::InvalidLength{max: 64, actual: n} => assert_eq!(n, 65));
+            assert_matches!(Felt::from_hex(&"1".repeat(65)).unwrap_err(), HexParseError::InvalidLength{max: 64, actual: n} => assert_eq!(n, 65));
         }
 
         #[test]
@@ -935,13 +963,13 @@ mod tests {
             let mut modulus =
                 "0x800000000000011000000000000000000000000000000000000000000000001".to_string();
             assert_eq!(
-                Felt::from_hex_str(&modulus).unwrap_err(),
+                Felt::from_hex(&modulus).unwrap_err(),
                 HexParseError::Overflow
             );
             // Field modulus - 1
             modulus.pop();
             modulus.push('0');
-            Felt::from_hex_str(&modulus).unwrap();
+            Felt::from_hex(&modulus).unwrap();
         }
     }
 
@@ -963,7 +991,7 @@ mod tests {
 
         #[test]
         fn odd() {
-            let hash = Felt::from_hex_str(ODD).unwrap();
+            let hash = Felt::from_hex(ODD).unwrap();
             assert_eq!(hash.to_hex_str(), ODD);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), ODD);
@@ -971,7 +999,7 @@ mod tests {
 
         #[test]
         fn even() {
-            let hash = Felt::from_hex_str(EVEN).unwrap();
+            let hash = Felt::from_hex(EVEN).unwrap();
             assert_eq!(hash.to_hex_str(), EVEN);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), EVEN);
@@ -979,7 +1007,7 @@ mod tests {
 
         #[test]
         fn max() {
-            let hash = Felt::from_hex_str(MAX).unwrap();
+            let hash = Felt::from_hex(MAX).unwrap();
             assert_eq!(hash.to_hex_str(), MAX);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), MAX);
@@ -1099,7 +1127,7 @@ mod tests {
         #[test]
         fn multi_limb_carry() {
             // Large value spanning multiple limbs
-            let a = Felt::from_hex_str(
+            let a = Felt::from_hex(
                 "0x0000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
             )
             .unwrap();

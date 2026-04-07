@@ -11,6 +11,7 @@ license = "MIT"
 starknet = { version = "0.17.0", optional = true }
 starknet-types-core = { version = "0.2.0", optional = true }
 serde = { version = "1.0.160", optional = true, features = ["derive"] }
+num-traits = "0.2.19"
 
 [dev-dependencies]
 pretty_assertions_sorted = "1.2.3"
