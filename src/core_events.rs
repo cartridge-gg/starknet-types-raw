@@ -1,5 +1,4 @@
 use crate::event::{EmittedEvent, Event};
-use crate::Felt;
 use starknet::core::types::{EmittedEvent as SnEmittedEvent, Event as SnEvent};
 
 impl From<SnEvent> for Event {

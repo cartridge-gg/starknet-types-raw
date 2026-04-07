@@ -57,6 +57,19 @@ pub struct OverflowError;
 
 impl Error for OverflowError {}
 
+// TryFrom<Felt> for primitive
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PrimitiveFromFeltError;
+
+impl Error for PrimitiveFromFeltError {}
+
+impl core::fmt::Display for PrimitiveFromFeltError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Failed to convert `Felt` into primitive type")
+    }
+}
+
 const OVERFLOW_MSG: &str = "The maximum field value was exceeded.";
 
 impl std::fmt::Display for OverflowError {
@@ -330,14 +343,14 @@ fn ge_modulus(limbs: &[u64; 4]) -> bool {
 }
 
 impl TryInto<u128> for Felt {
-    type Error = OverflowError;
+    type Error = PrimitiveFromFeltError;
 
     fn try_into(self) -> Result<u128, Self::Error> {
         let initial_zeroes = self.0.iter().take_while(|b| **b == 0).count();
         const EXPECTED_ZEROES: usize = (32 - u128::BITS / u8::BITS) as usize;
 
         if initial_zeroes < EXPECTED_ZEROES {
-            return Err(OverflowError);
+            return Err(PrimitiveFromFeltError);
         }
 
         let bytes = self.0[EXPECTED_ZEROES..]
@@ -348,14 +361,14 @@ impl TryInto<u128> for Felt {
 }
 
 impl TryInto<u64> for Felt {
-    type Error = OverflowError;
+    type Error = PrimitiveFromFeltError;
 
     fn try_into(self) -> Result<u64, Self::Error> {
         let initial_zeroes = self.0.iter().take_while(|b| **b == 0).count();
         const EXPECTED_ZEROES: usize = (32 - u64::BITS / u8::BITS) as usize;
 
         if initial_zeroes < EXPECTED_ZEROES {
-            return Err(OverflowError);
+            return Err(PrimitiveFromFeltError);
         }
         let bytes = self.0[EXPECTED_ZEROES..]
             .try_into()
