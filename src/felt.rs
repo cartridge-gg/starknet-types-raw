@@ -108,6 +108,10 @@ impl Felt {
         &self.0
     }
 
+    pub const fn as_be_bytes_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
     /// Big-endian mutable representation of this [Felt].
     pub fn as_mut_be_bytes(&mut self) -> &mut [u8; 32] {
         &mut self.0
