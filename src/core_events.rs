@@ -1,30 +1,6 @@
 use crate::event::{EmittedEvent, Event};
 use crate::Felt;
-use starknet::core::types::Felt as SnFelt;
 use starknet::core::types::{EmittedEvent as SnEmittedEvent, Event as SnEvent};
-
-impl From<SnFelt> for Felt {
-    fn from(value: SnFelt) -> Self {
-        Self(value.to_bytes_be())
-    }
-}
-
-impl From<&SnFelt> for Felt {
-    fn from(value: &SnFelt) -> Self {
-        Self(value.to_bytes_be())
-    }
-}
-
-impl From<Felt> for SnFelt {
-    fn from(value: Felt) -> Self {
-        Self::from_bytes_be(&value.0)
-    }
-}
-impl From<&Felt> for SnFelt {
-    fn from(value: &Felt) -> Self {
-        Self::from_bytes_be(&value.0)
-    }
-}
 
 impl From<SnEvent> for Event {
     fn from(value: SnEvent) -> Self {
