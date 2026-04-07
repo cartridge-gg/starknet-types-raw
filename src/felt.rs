@@ -246,6 +246,89 @@ impl From<[u8; 31]> for Felt {
     }
 }
 
+impl std::ops::Add for Felt {
+    type Output = Felt;
+
+    fn add(self, rhs: Self) -> Felt {
+        // Interpret as 4 big-endian u64 limbs (most significant first).
+        let a = to_u64x4(&self.0);
+        let b = to_u64x4(&rhs.0);
+
+        // Add limbs right-to-left with carry.
+        let (s3, carry) = a[3].overflowing_add(b[3]);
+        let (s2, c1) = a[2].overflowing_add(b[2]);
+        let (s2, c2) = s2.overflowing_add(carry as u64);
+        let carry = c1 | c2;
+        let (s1, c1) = a[1].overflowing_add(b[1]);
+        let (s1, c2) = s1.overflowing_add(carry as u64);
+        let carry = c1 | c2;
+        let (s0, c1) = a[0].overflowing_add(b[0]);
+        let (s0, c2) = s0.overflowing_add(carry as u64);
+        let overflow = c1 | c2;
+
+        // Conditionally subtract the modulus. Since both operands are < p,
+        // the sum is < 2p, so at most one subtraction is needed.
+        let mut sum = [s0, s1, s2, s3];
+        if overflow || ge_modulus(&sum) {
+            let (d3, borrow) = sum[3].overflowing_sub(MODULUS_U64[3]);
+            let (d2, b1) = sum[2].overflowing_sub(MODULUS_U64[2]);
+            let (d2, b2) = d2.overflowing_sub(borrow as u64);
+            let borrow = b1 | b2;
+            let (d1, b1) = sum[1].overflowing_sub(MODULUS_U64[1]);
+            let (d1, b2) = d1.overflowing_sub(borrow as u64);
+            let borrow = b1 | b2;
+            let (d0, _) = sum[0].overflowing_sub(MODULUS_U64[0]);
+            let (d0, _) = d0.overflowing_sub(borrow as u64);
+            sum = [d0, d1, d2, d3];
+        }
+
+        from_u64x4(&sum)
+    }
+}
+
+/// Big-endian `[u8; 32]` to 4 big-endian u64 limbs.
+fn to_u64x4(bytes: &[u8; 32]) -> [u64; 4] {
+    [
+        u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]),
+        u64::from_be_bytes([
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        ]),
+        u64::from_be_bytes([
+            bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
+        ]),
+        u64::from_be_bytes([
+            bytes[24], bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31],
+        ]),
+    ]
+}
+
+/// 4 big-endian u64 limbs back to `Felt`.
+fn from_u64x4(limbs: &[u64; 4]) -> Felt {
+    let mut bytes = [0u8; 32];
+    bytes[0..8].copy_from_slice(&limbs[0].to_be_bytes());
+    bytes[8..16].copy_from_slice(&limbs[1].to_be_bytes());
+    bytes[16..24].copy_from_slice(&limbs[2].to_be_bytes());
+    bytes[24..32].copy_from_slice(&limbs[3].to_be_bytes());
+    Felt(bytes)
+}
+
+/// Returns true if limbs >= MODULUS_U64 (big-endian comparison).
+fn ge_modulus(limbs: &[u64; 4]) -> bool {
+    let mut i = 0;
+    while i < 4 {
+        if limbs[i] < MODULUS_U64[i] {
+            return false;
+        }
+        if limbs[i] > MODULUS_U64[i] {
+            return true;
+        }
+        i += 1;
+    }
+    true // equal
+}
+
 impl TryInto<u128> for Felt {
     type Error = OverflowError;
 
@@ -711,6 +794,101 @@ mod tests {
             bytes[0] = 0x08;
             let h = Felt::from_be_bytes(bytes).unwrap();
             assert!(h.has_more_than_251_bits());
+        }
+    }
+
+    mod add {
+        use super::{Felt, MODULUS_U8};
+        use starknet_types_core::felt::Felt as SnFelt;
+
+        fn assert_add_matches(a: Felt, b: Felt) {
+            let our_result = a + b;
+            let sn_result = SnFelt::from_bytes_be(&a.0) + SnFelt::from_bytes_be(&b.0);
+            assert_eq!(
+                our_result.0,
+                sn_result.to_bytes_be(),
+                "mismatch for {a:?} + {b:?}"
+            );
+        }
+
+        #[test]
+        fn zero_plus_zero() {
+            assert_add_matches(Felt::ZERO, Felt::ZERO);
+        }
+
+        #[test]
+        fn zero_plus_one() {
+            assert_add_matches(Felt::ZERO, Felt::ONE);
+        }
+
+        #[test]
+        fn one_plus_one() {
+            assert_add_matches(Felt::ONE, Felt::ONE);
+        }
+
+        #[test]
+        fn small_values() {
+            let a = Felt::from_u64(12345);
+            let b = Felt::from_u64(67890);
+            assert_add_matches(a, b);
+        }
+
+        #[test]
+        fn large_values_no_wrap() {
+            let a = Felt::from_u128(u128::MAX);
+            let b = Felt::from_u128(u128::MAX);
+            assert_add_matches(a, b);
+        }
+
+        #[test]
+        fn wraps_around_modulus() {
+            // p - 1
+            let max = Felt::from_be_bytes({
+                let mut m = MODULUS_U8;
+                m[31] -= 1;
+                m
+            })
+            .unwrap();
+            assert_add_matches(max, Felt::ONE);
+            assert_add_matches(max, max);
+        }
+
+        #[test]
+        fn near_modulus() {
+            let max = Felt::from_be_bytes({
+                let mut m = MODULUS_U8;
+                m[31] -= 1;
+                m
+            })
+            .unwrap();
+            let half = Felt::from_be_bytes({
+                let mut m = MODULUS_U8;
+                m[0] = 4;
+                m[31] = 0;
+                m
+            })
+            .unwrap();
+            assert_add_matches(max, half);
+            assert_add_matches(half, half);
+        }
+
+        #[test]
+        fn carry_propagation() {
+            // 0x00..00FF_FFFF_FFFF_FFFF + 1 forces a carry across limb boundary
+            let a = Felt::from_u64(u64::MAX);
+            let b = Felt::ONE;
+            assert_add_matches(a, b);
+        }
+
+        #[test]
+        fn multi_limb_carry() {
+            // Large value spanning multiple limbs
+            let a = Felt::from_hex_str(
+                "0x0000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            )
+            .unwrap();
+            let b = Felt::ONE;
+            assert_add_matches(a, b);
         }
     }
 }
