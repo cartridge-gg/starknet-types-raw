@@ -99,7 +99,7 @@ impl Felt {
     }
 
     /// Returns 4 big-endian u64 limbs: `[0]` is the most significant word.
-    pub const fn to_words_be(&self) -> [u64; 4] {
+    pub const fn to_be_words(&self) -> [u64; 4] {
         [
             u64::from_be_bytes([
                 self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], self.0[6],
@@ -121,7 +121,7 @@ impl Felt {
     }
 
     /// Returns 4 little-endian u64 limbs: `[0]` is the least significant word.
-    pub const fn to_words_le(&self) -> [u64; 4] {
+    pub const fn to_le_words(&self) -> [u64; 4] {
         [
             u64::from_be_bytes([
                 self.0[24], self.0[25], self.0[26], self.0[27], self.0[28], self.0[29], self.0[30],
@@ -143,7 +143,7 @@ impl Felt {
     }
 
     /// Creates a [Felt] from 4 big-endian u64 limbs: `words[0]` is the most significant.
-    pub const fn from_words_be(words: [u64; 4]) -> Self {
+    pub const fn from_be_words(words: [u64; 4]) -> Self {
         let w0 = words[0].to_be_bytes();
         let w1 = words[1].to_be_bytes();
         let w2 = words[2].to_be_bytes();
@@ -156,7 +156,7 @@ impl Felt {
     }
 
     /// Creates a [Felt] from 4 little-endian u64 limbs: `words[0]` is the least significant.
-    pub const fn from_words_le(words: [u64; 4]) -> Self {
+    pub const fn from_le_words(words: [u64; 4]) -> Self {
         let w0 = words[3].to_be_bytes();
         let w1 = words[2].to_be_bytes();
         let w2 = words[1].to_be_bytes();
@@ -394,7 +394,7 @@ impl Felt {
             return Err(FromStrError::Overflow);
         }
 
-        Ok(Felt::from_words_be(limbs))
+        Ok(Felt::from_be_words(limbs))
     }
 
     /// The first stage of conversion - skip leading zeros.
@@ -707,7 +707,7 @@ impl std::ops::Neg for Felt {
         }
         // p - self
         let a = MODULUS_U64;
-        let b = self.to_words_be();
+        let b = self.to_be_words();
 
         let (d3, borrow) = a[3].overflowing_sub(b[3]);
         let (d2, b1) = a[2].overflowing_sub(b[2]);
@@ -719,7 +719,7 @@ impl std::ops::Neg for Felt {
         let (d0, _) = a[0].overflowing_sub(b[0]);
         let (d0, _) = d0.overflowing_sub(borrow as u64);
 
-        Felt::from_words_be([d0, d1, d2, d3])
+        Felt::from_be_words([d0, d1, d2, d3])
     }
 }
 
@@ -736,8 +736,8 @@ impl std::ops::Add for Felt {
 
     fn add(self, rhs: Self) -> Felt {
         // Interpret as 4 big-endian u64 limbs (most significant first).
-        let a = self.to_words_be();
-        let b = rhs.to_words_be();
+        let a = self.to_be_words();
+        let b = rhs.to_be_words();
 
         // Add limbs right-to-left with carry.
         let (s3, carry) = a[3].overflowing_add(b[3]);
@@ -767,7 +767,7 @@ impl std::ops::Add for Felt {
             sum = [d0, d1, d2, d3];
         }
 
-        Felt::from_words_be(sum)
+        Felt::from_be_words(sum)
     }
 }
 
