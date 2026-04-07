@@ -1,7 +1,7 @@
+use crate::error::{FromStrError, OverflowError, PrimitiveFromFeltError};
 use crate::keccak::keccak256;
 use num_traits::Zero;
 use std::borrow::Cow;
-use std::error::Error;
 
 /// Starknet Field Element.
 ///
@@ -49,34 +49,6 @@ impl std::fmt::UpperHex for Felt {
 impl Default for Felt {
     fn default() -> Self {
         Felt::ZERO
-    }
-}
-
-/// Error returned by [Felt::from_be_bytes] indicating the maximum field value
-/// was exceeded.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct OverflowError;
-
-impl Error for OverflowError {}
-
-// TryFrom<Felt> for primitive
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct PrimitiveFromFeltError;
-
-impl Error for PrimitiveFromFeltError {}
-
-impl core::fmt::Display for PrimitiveFromFeltError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Failed to convert `Felt` into primitive type")
-    }
-}
-
-const OVERFLOW_MSG: &str = "The maximum field value was exceeded.";
-
-impl std::fmt::Display for OverflowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(OVERFLOW_MSG)
     }
 }
 
@@ -242,13 +214,13 @@ impl Felt {
     ///
     /// Supports both upper and lower case hex strings, as well as an optional
     /// "0x" prefix.
-    pub const fn from_hex(hex_str: &str) -> Result<Self, HexParseError> {
-        const fn parse_hex_digit(digit: u8) -> Result<u8, HexParseError> {
+    pub const fn from_hex(hex_str: &str) -> Result<Self, FromStrError> {
+        const fn parse_hex_digit(digit: u8) -> Result<u8, FromStrError> {
             match digit {
                 b'0'..=b'9' => Ok(digit - b'0'),
                 b'A'..=b'F' => Ok(digit - b'A' + 10),
                 b'a'..=b'f' => Ok(digit - b'a' + 10),
-                other => Err(HexParseError::InvalidNibble(other)),
+                other => Err(FromStrError::InvalidNibble(other)),
             }
         }
 
@@ -261,7 +233,7 @@ impl Felt {
         let len = bytes.len() - start;
 
         if len > 64 {
-            return Err(HexParseError::InvalidLength {
+            return Err(FromStrError::InvalidLength {
                 max: 64,
                 actual: bytes.len(),
             });
@@ -299,9 +271,51 @@ impl Felt {
 
         let felt = match Felt::from_be_bytes(buf) {
             Ok(felt) => felt,
-            Err(OverflowError) => return Err(HexParseError::Overflow),
+            Err(OverflowError) => return Err(FromStrError::Overflow),
         };
         Ok(felt)
+    }
+
+    /// Parses a decimal string into a [Felt].
+    ///
+    /// Returns [FromStrError] if the string contains non-digit characters,
+    /// is empty, or the value exceeds the field modulus.
+    pub fn from_dec_str(dec_str: &str) -> Result<Self, FromStrError> {
+        let bytes = dec_str.as_bytes();
+        if bytes.is_empty() {
+            return Err(FromStrError::EmptyString);
+        }
+
+        // Accumulate into 4 big-endian u64 limbs via multiply-by-10 + add-digit.
+        let mut limbs = [0u64; 4];
+        for &b in bytes {
+            let digit = match b {
+                b'0'..=b'9' => (b - b'0') as u64,
+                _ => return Err(FromStrError::InvalidDigit(b)),
+            };
+
+            // limbs = limbs * 10 + digit, propagating carries from low to high.
+            let mut carry = digit;
+            let mut i = 3;
+            loop {
+                let wide = (limbs[i] as u128) * 10 + carry as u128;
+                limbs[i] = wide as u64;
+                carry = (wide >> 64) as u64;
+                if i == 0 {
+                    break;
+                }
+                i -= 1;
+            }
+            if carry != 0 {
+                return Err(FromStrError::Overflow);
+            }
+        }
+
+        if ge_modulus(&limbs) {
+            return Err(FromStrError::Overflow);
+        }
+
+        Ok(from_u64x4(&limbs))
     }
 
     /// The first stage of conversion - skip leading zeros
@@ -768,6 +782,18 @@ impl TryFrom<Felt> for i8 {
     }
 }
 
+impl std::str::FromStr for Felt {
+    type Err = FromStrError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with("0x") || s.starts_with("0X") {
+            Self::from_hex(s)
+        } else {
+            Self::from_dec_str(s)
+        }
+    }
+}
+
 impl Zero for Felt {
     fn zero() -> Self {
         Self::ZERO
@@ -775,34 +801,6 @@ impl Zero for Felt {
 
     fn is_zero(&self) -> bool {
         *self == Self::ZERO
-    }
-}
-
-/// Error returned by [Felt::from_hex_str] indicating an invalid hex string.
-#[derive(Debug, PartialEq, Eq)]
-pub enum HexParseError {
-    InvalidNibble(u8),
-    InvalidLength { max: usize, actual: usize },
-    Overflow,
-}
-
-impl Error for HexParseError {}
-
-impl From<OverflowError> for HexParseError {
-    fn from(_: OverflowError) -> Self {
-        Self::Overflow
-    }
-}
-
-impl std::fmt::Display for HexParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidNibble(n) => f.write_fmt(format_args!("Invalid nibble found: 0x{:x}", *n)),
-            Self::InvalidLength { max, actual } => {
-                f.write_fmt(format_args!("More than {} digits found: {}", *max, *actual))
-            }
-            Self::Overflow => f.write_str(OVERFLOW_MSG),
-        }
     }
 }
 
@@ -986,12 +984,12 @@ mod tests {
 
         #[test]
         fn invalid_nibble() {
-            assert_matches!(Felt::from_hex("0x123z").unwrap_err(), HexParseError::InvalidNibble(n) => assert_eq!(n, b'z'));
+            assert_matches!(Felt::from_hex("0x123z").unwrap_err(), FromStrError::InvalidNibble(n) => assert_eq!(n, b'z'));
         }
 
         #[test]
         fn invalid_len() {
-            assert_matches!(Felt::from_hex(&"1".repeat(65)).unwrap_err(), HexParseError::InvalidLength{max: 64, actual: n} => assert_eq!(n, 65));
+            assert_matches!(Felt::from_hex(&"1".repeat(65)).unwrap_err(), FromStrError::InvalidLength{max: 64, actual: n} => assert_eq!(n, 65));
         }
 
         #[test]
@@ -1001,7 +999,7 @@ mod tests {
                 "0x800000000000011000000000000000000000000000000000000000000000001".to_string();
             assert_eq!(
                 Felt::from_hex(&modulus).unwrap_err(),
-                HexParseError::Overflow
+                FromStrError::Overflow
             );
             // Field modulus - 1
             modulus.pop();
