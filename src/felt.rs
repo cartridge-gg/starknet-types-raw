@@ -377,6 +377,15 @@ impl Felt {
         hash[0] &= 0b0000_0011;
         Felt(hash)
     }
+
+    pub fn to_fixed_hex_string(&self) -> String {
+        let mut buf = [0u8; 64];
+        self.0.iter().enumerate().for_each(|(i, &b)| {
+            let hex = format!("{b:02x}");
+            buf[i * 2..i * 2 + 2].copy_from_slice(hex.as_bytes());
+        });
+        String::from_utf8(buf.to_vec()).unwrap()
+    }
 }
 
 macro_rules! const_expect {
@@ -482,6 +491,30 @@ impl From<i16> for Felt {
 impl From<i8> for Felt {
     fn from(value: i8) -> Self {
         Felt::from(value as i128)
+    }
+}
+
+impl From<Felt> for Vec<u8> {
+    fn from(value: Felt) -> Self {
+        value.0.to_vec()
+    }
+}
+
+impl From<&Felt> for Vec<u8> {
+    fn from(value: &Felt) -> Self {
+        value.0.to_vec()
+    }
+}
+
+impl From<Felt> for [u8; 32] {
+    fn from(value: Felt) -> Self {
+        value.0
+    }
+}
+
+impl From<&Felt> for [u8; 32] {
+    fn from(value: &Felt) -> Self {
+        value.0
     }
 }
 
