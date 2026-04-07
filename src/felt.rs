@@ -84,6 +84,16 @@ impl Felt {
         self.0.as_slice()
     }
 
+    pub fn to_be_bytes_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+
+    pub fn to_le_bytes_vec(&self) -> Vec<u8> {
+        let mut tmp = self.0;
+        tmp.reverse();
+        tmp.to_vec()
+    }
+
     /// Big-endian mutable representation of this [Felt].
     pub fn as_mut_be_bytes(&mut self) -> &mut [u8; 32] {
         &mut self.0
