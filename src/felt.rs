@@ -1,7 +1,6 @@
 use crate::error::{FromStrError, OverflowError, PrimitiveFromFeltError};
 use crate::keccak::keccak256;
 use num_traits::Zero;
-use std::borrow::Cow;
 
 /// Starknet Field Element.
 ///
@@ -328,7 +327,8 @@ impl Felt {
         Ok(from_u64x4(&limbs))
     }
 
-    /// The first stage of conversion - skip leading zeros
+    /// The first stage of conversion - skip leading zeros.
+    /// Caller must ensure `self` is not zero.
     fn skip_zeros(&self) -> (impl Iterator<Item = &u8>, usize, usize) {
         // Skip all leading zero bytes
         let it = self.0.iter().skip_while(|&&b| b == 0);
@@ -373,7 +373,7 @@ impl Felt {
             expected_buf_len
         );
 
-        if !self.0.iter().any(|b| *b != 0) {
+        if self.is_zero() {
             return "0x0";
         }
 
@@ -385,15 +385,15 @@ impl Felt {
 
     /// A convenience function which produces a "0x" prefixed hex string from a
     /// [Felt].
-    pub fn to_hex_str(&self) -> Cow<'static, str> {
-        if !self.0.iter().any(|b| *b != 0) {
-            return Cow::from("0x0");
+    pub fn to_hex_string(&self) -> String {
+        if self.is_zero() {
+            return "0x0".to_string();
         }
         let (it, start, len) = self.skip_zeros();
         let mut buf = vec![0u8; len];
         Self::it_to_hex_str(it, start, len, &mut buf);
         // Unwrap is safe as the buffer contains valid utf8
-        String::from_utf8(buf).unwrap().into()
+        String::from_utf8(buf).unwrap()
     }
 
     /// Computes a Starknet selector from a function/event name.
@@ -1100,7 +1100,7 @@ mod tests {
         }
     }
 
-    mod to_hex_str {
+    mod to_hex_string {
         use pretty_assertions_sorted::assert_eq;
 
         use super::*;
@@ -1111,7 +1111,7 @@ mod tests {
 
         #[test]
         fn zero() {
-            assert_eq!(Felt::ZERO.to_hex_str(), "0x0");
+            assert_eq!(Felt::ZERO.to_hex_string(), "0x0");
             let mut buf = [0u8; 66];
             assert_eq!(Felt::ZERO.as_hex_str(&mut buf), "0x0");
         }
@@ -1119,7 +1119,7 @@ mod tests {
         #[test]
         fn odd() {
             let hash = Felt::from_hex(ODD).unwrap();
-            assert_eq!(hash.to_hex_str(), ODD);
+            assert_eq!(hash.to_hex_string(), ODD);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), ODD);
         }
@@ -1127,7 +1127,7 @@ mod tests {
         #[test]
         fn even() {
             let hash = Felt::from_hex(EVEN).unwrap();
-            assert_eq!(hash.to_hex_str(), EVEN);
+            assert_eq!(hash.to_hex_string(), EVEN);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), EVEN);
         }
@@ -1135,7 +1135,7 @@ mod tests {
         #[test]
         fn max() {
             let hash = Felt::from_hex(MAX).unwrap();
-            assert_eq!(hash.to_hex_str(), MAX);
+            assert_eq!(hash.to_hex_string(), MAX);
             let mut buf = [0u8; 66];
             assert_eq!(hash.as_hex_str(&mut buf), MAX);
         }

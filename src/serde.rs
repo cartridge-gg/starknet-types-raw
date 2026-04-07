@@ -8,7 +8,7 @@ impl Serialize for Felt {
         S: serde::Serializer,
     {
         if serializer.is_human_readable() {
-            serializer.serialize_str(&self.to_hex_str())
+            serializer.serialize_str(&self.to_hex_string())
         } else {
             let bytes = self.as_be_bytes();
             let first = bytes.iter().position(|&b| b != 0).unwrap_or(31);
