@@ -438,6 +438,46 @@ impl Felt {
         Self(buf)
     }
 
+    pub const fn as_short_ascii_str(&self) -> Result<&str, FromStrError> {
+        let bytes = &self.0;
+        let mut start = 0;
+        while start < 32 {
+            if bytes[start] != 0 {
+                break;
+            }
+            start += 1;
+        }
+        if start == 32 {
+            return Ok("");
+        }
+        let mut i = start;
+        while i < 32 {
+            if bytes[i] > 127 {
+                return Err(FromStrError::NonAsciiCharacter);
+            }
+            i += 1;
+        }
+        // Safety: all bytes from start..32 are verified ≤ 127, which is valid UTF-8.
+        let (_, tail) = bytes.split_at(start);
+        Ok(unsafe { core::str::from_utf8_unchecked(tail) })
+    }
+
+    /// Like [`as_short_ascii_str`](Self::as_short_ascii_str) but without
+    /// ASCII validation. The caller must ensure the non-zero bytes are valid ASCII.
+    pub const fn as_short_ascii_str_unchecked(&self) -> &str {
+        let bytes = &self.0;
+        let mut start = 0;
+        while start < 32 {
+            if bytes[start] != 0 {
+                break;
+            }
+            start += 1;
+        }
+        // Safety: caller guarantees all non-zero bytes are ASCII (≤ 127).
+        let (_, tail) = bytes.split_at(start);
+        unsafe { core::str::from_utf8_unchecked(tail) }
+    }
+
     pub fn to_fixed_hex_string(&self) -> String {
         let mut buf = [0u8; 64];
         self.0.iter().enumerate().for_each(|(i, &b)| {
@@ -1553,7 +1593,10 @@ mod tests {
         fn too_long() {
             assert_matches!(
                 Felt::from_short_ascii_str("12345678901234567890123456789012").unwrap_err(),
-                FromStrError::InvalidLength { max: 31, actual: 32 }
+                FromStrError::InvalidLength {
+                    max: 31,
+                    actual: 32
+                }
             );
         }
 
@@ -1596,10 +1639,89 @@ mod tests {
         #[test]
         fn const_eval() {
             const TRANSFER: Felt = Felt::from_short_ascii_str_unchecked("Transfer");
-            assert_eq!(
-                TRANSFER,
-                Felt::from_short_ascii_str("Transfer").unwrap()
+            assert_eq!(TRANSFER, Felt::from_short_ascii_str("Transfer").unwrap());
+        }
+    }
+
+    mod to_short_ascii_str {
+        use assert_matches::assert_matches;
+        use pretty_assertions_sorted::assert_eq;
+        use starknet::core::utils::parse_cairo_short_string;
+
+        use super::*;
+
+        fn assert_matches_reference(s: &str) {
+            let felt = Felt::from_short_ascii_str(s).unwrap();
+            let ours = felt.as_short_ascii_str().unwrap();
+            let sn_felt = starknet::core::types::Felt::from_bytes_be(&felt.0);
+            let reference = parse_cairo_short_string(&sn_felt).unwrap();
+            assert_eq!(ours, reference, "mismatch for {s:?}");
+        }
+
+        #[test]
+        fn empty() {
+            assert_eq!(Felt::ZERO.as_short_ascii_str().unwrap(), "");
+        }
+
+        #[test]
+        fn single_char() {
+            assert_matches_reference("a");
+        }
+
+        #[test]
+        fn hello() {
+            assert_matches_reference("hello");
+        }
+
+        #[test]
+        fn max_length() {
+            assert_matches_reference("1234567890123456789012345678901");
+        }
+
+        #[test]
+        fn digits() {
+            assert_matches_reference("0123456789");
+        }
+
+        #[test]
+        fn special_ascii() {
+            assert_matches_reference("!@#$%^&*()");
+        }
+
+        #[test]
+        fn spaces() {
+            assert_matches_reference("hello world");
+        }
+
+        #[test]
+        fn non_ascii_rejected() {
+            // Byte 0x80 is > 127
+            let felt = Felt::from_be_bytes_slice_unchecked(&[0x80]);
+            assert_matches!(
+                felt.as_short_ascii_str().unwrap_err(),
+                FromStrError::NonAsciiCharacter
             );
+        }
+
+        #[test]
+        fn round_trip() {
+            let s = "Transfer";
+            let felt = Felt::from_short_ascii_str(s).unwrap();
+            assert_eq!(felt.as_short_ascii_str().unwrap(), s);
+        }
+
+        #[test]
+        fn unchecked_matches_checked() {
+            let s = "balanceOf";
+            let felt = Felt::from_short_ascii_str(s).unwrap();
+            let checked = felt.as_short_ascii_str().unwrap();
+            let unchecked = felt.as_short_ascii_str_unchecked();
+            assert_eq!(checked, unchecked);
+        }
+
+        #[test]
+        fn unchecked_empty() {
+            assert_eq!(Felt::ZERO.as_short_ascii_str_unchecked(), "");
         }
     }
 }
