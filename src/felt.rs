@@ -450,21 +450,40 @@ fn ge_modulus(limbs: &[u64; 4]) -> bool {
     true // equal
 }
 
-impl TryFrom<Felt> for u128 {
+impl TryFrom<Felt> for u8 {
     type Error = PrimitiveFromFeltError;
 
-    fn try_from(felt: Felt) -> Result<u128, Self::Error> {
-        let initial_zeroes = felt.0.iter().take_while(|b| **b == 0).count();
-        const EXPECTED_ZEROES: usize = (32 - u128::BITS / u8::BITS) as usize;
+    fn try_from(felt: Felt) -> Result<u8, Self::Error> {
+        match felt.0 {
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, v] => {
+                Ok(v)
+            }
+            _ => Err(PrimitiveFromFeltError),
+        }
+    }
+}
 
-        if initial_zeroes < EXPECTED_ZEROES {
+impl TryFrom<Felt> for u16 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<u16, Self::Error> {
+        if felt.0[..30] != [0u8; 30] {
             return Err(PrimitiveFromFeltError);
         }
+        Ok(u16::from_be_bytes([felt.0[30], felt.0[31]]))
+    }
+}
 
-        let bytes = felt.0[EXPECTED_ZEROES..]
-            .try_into()
-            .expect("Should match u128 size");
-        Ok(u128::from_be_bytes(bytes))
+impl TryFrom<Felt> for u32 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<u32, Self::Error> {
+        if felt.0[..28] != [0u8; 28] {
+            return Err(PrimitiveFromFeltError);
+        }
+        Ok(u32::from_be_bytes([
+            felt.0[28], felt.0[29], felt.0[30], felt.0[31],
+        ]))
     }
 }
 
@@ -472,16 +491,28 @@ impl TryFrom<Felt> for u64 {
     type Error = PrimitiveFromFeltError;
 
     fn try_from(felt: Felt) -> Result<u64, Self::Error> {
-        let initial_zeroes = felt.0.iter().take_while(|b| **b == 0).count();
-        const EXPECTED_ZEROES: usize = (32 - u64::BITS / u8::BITS) as usize;
-
-        if initial_zeroes < EXPECTED_ZEROES {
+        if felt.0[..24] != [0u8; 24] {
             return Err(PrimitiveFromFeltError);
         }
-        let bytes = felt.0[EXPECTED_ZEROES..]
-            .try_into()
-            .expect("Should match u64 size");
-        Ok(u64::from_be_bytes(bytes))
+        Ok(u64::from_be_bytes([
+            felt.0[24], felt.0[25], felt.0[26], felt.0[27], felt.0[28], felt.0[29], felt.0[30],
+            felt.0[31],
+        ]))
+    }
+}
+
+impl TryFrom<Felt> for u128 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<u128, Self::Error> {
+        if felt.0[..16] != [0u8; 16] {
+            return Err(PrimitiveFromFeltError);
+        }
+        Ok(u128::from_be_bytes([
+            felt.0[16], felt.0[17], felt.0[18], felt.0[19], felt.0[20], felt.0[21], felt.0[22],
+            felt.0[23], felt.0[24], felt.0[25], felt.0[26], felt.0[27], felt.0[28], felt.0[29],
+            felt.0[30], felt.0[31],
+        ]))
     }
 }
 
