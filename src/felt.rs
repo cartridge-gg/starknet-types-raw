@@ -239,6 +239,34 @@ macro_rules! const_expect {
 
 use const_expect;
 
+impl From<bool> for Felt {
+    fn from(value: bool) -> Self {
+        if value {
+            Self::ONE
+        } else {
+            Self::ZERO
+        }
+    }
+}
+
+impl From<u8> for Felt {
+    fn from(value: u8) -> Self {
+        Self::from_u64(value as u64)
+    }
+}
+
+impl From<u16> for Felt {
+    fn from(value: u16) -> Self {
+        Self::from_u64(value as u64)
+    }
+}
+
+impl From<u32> for Felt {
+    fn from(value: u32) -> Self {
+        Self::from_u64(value as u64)
+    }
+}
+
 impl From<u64> for Felt {
     fn from(value: u64) -> Self {
         Self::from_u64(value)
@@ -268,6 +296,74 @@ impl From<[u8; 31]> for Felt {
         let mut buf = [0u8; 32];
         buf[1..].copy_from_slice(&bytes);
         Self(buf)
+    }
+}
+
+impl From<i128> for Felt {
+    fn from(value: i128) -> Self {
+        let abs = Felt::from_u128(value.unsigned_abs());
+        if value.is_negative() {
+            -abs
+        } else {
+            abs
+        }
+    }
+}
+
+impl From<i64> for Felt {
+    fn from(value: i64) -> Self {
+        Felt::from(value as i128)
+    }
+}
+
+impl From<i32> for Felt {
+    fn from(value: i32) -> Self {
+        Felt::from(value as i128)
+    }
+}
+
+impl From<i16> for Felt {
+    fn from(value: i16) -> Self {
+        Felt::from(value as i128)
+    }
+}
+
+impl From<i8> for Felt {
+    fn from(value: i8) -> Self {
+        Felt::from(value as i128)
+    }
+}
+
+impl std::ops::Neg for Felt {
+    type Output = Felt;
+
+    fn neg(self) -> Felt {
+        if self == Felt::ZERO {
+            return Felt::ZERO;
+        }
+        // p - self
+        let a = MODULUS_U64;
+        let b = to_u64x4(&self.0);
+
+        let (d3, borrow) = a[3].overflowing_sub(b[3]);
+        let (d2, b1) = a[2].overflowing_sub(b[2]);
+        let (d2, b2) = d2.overflowing_sub(borrow as u64);
+        let borrow = b1 | b2;
+        let (d1, b1) = a[1].overflowing_sub(b[1]);
+        let (d1, b2) = d1.overflowing_sub(borrow as u64);
+        let borrow = b1 | b2;
+        let (d0, _) = a[0].overflowing_sub(b[0]);
+        let (d0, _) = d0.overflowing_sub(borrow as u64);
+
+        from_u64x4(&[d0, d1, d2, d3])
+    }
+}
+
+impl std::ops::Sub for Felt {
+    type Output = Felt;
+
+    fn sub(self, rhs: Self) -> Felt {
+        self + (-rhs)
     }
 }
 
@@ -914,6 +1010,129 @@ mod tests {
             .unwrap();
             let b = Felt::ONE;
             assert_add_matches(a, b);
+        }
+    }
+
+    mod neg {
+        use super::{Felt, MODULUS_U8};
+        use starknet_types_core::felt::Felt as SnFelt;
+
+        fn assert_neg_matches(a: Felt) {
+            let our_result = -a;
+            let sn_result = -SnFelt::from_bytes_be(&a.0);
+            assert_eq!(
+                our_result.0,
+                sn_result.to_bytes_be(),
+                "mismatch for -({a:?})"
+            );
+        }
+
+        #[test]
+        fn zero() {
+            assert_neg_matches(Felt::ZERO);
+        }
+
+        #[test]
+        fn one() {
+            assert_neg_matches(Felt::ONE);
+        }
+
+        #[test]
+        fn small() {
+            assert_neg_matches(Felt::from_u64(12345));
+        }
+
+        #[test]
+        fn large() {
+            assert_neg_matches(Felt::from_u128(u128::MAX));
+        }
+
+        #[test]
+        fn max_felt() {
+            let max = Felt::from_be_bytes({
+                let mut m = MODULUS_U8;
+                m[31] -= 1;
+                m
+            })
+            .unwrap();
+            assert_neg_matches(max);
+        }
+
+        #[test]
+        fn double_neg_is_identity() {
+            let a = Felt::from_u64(42);
+            assert_eq!(-(-a), a);
+        }
+    }
+
+    mod sub {
+        use super::{Felt, MODULUS_U8};
+        use starknet_types_core::felt::Felt as SnFelt;
+
+        fn assert_sub_matches(a: Felt, b: Felt) {
+            let our_result = a - b;
+            let sn_result = SnFelt::from_bytes_be(&a.0) - SnFelt::from_bytes_be(&b.0);
+            assert_eq!(
+                our_result.0,
+                sn_result.to_bytes_be(),
+                "mismatch for {a:?} - {b:?}"
+            );
+        }
+
+        #[test]
+        fn zero_minus_zero() {
+            assert_sub_matches(Felt::ZERO, Felt::ZERO);
+        }
+
+        #[test]
+        fn one_minus_one() {
+            assert_sub_matches(Felt::ONE, Felt::ONE);
+        }
+
+        #[test]
+        fn a_minus_zero() {
+            assert_sub_matches(Felt::from_u64(42), Felt::ZERO);
+        }
+
+        #[test]
+        fn zero_minus_one() {
+            // Should wrap: 0 - 1 = p - 1
+            assert_sub_matches(Felt::ZERO, Felt::ONE);
+        }
+
+        #[test]
+        fn small_values() {
+            assert_sub_matches(Felt::from_u64(100), Felt::from_u64(42));
+        }
+
+        #[test]
+        fn wraps_around() {
+            // small - large wraps around the modulus
+            assert_sub_matches(Felt::from_u64(1), Felt::from_u64(2));
+        }
+
+        #[test]
+        fn large_values() {
+            assert_sub_matches(Felt::from_u128(u128::MAX), Felt::from_u128(u128::MAX));
+        }
+
+        #[test]
+        fn max_minus_one() {
+            let max = Felt::from_be_bytes({
+                let mut m = MODULUS_U8;
+                m[31] -= 1;
+                m
+            })
+            .unwrap();
+            assert_sub_matches(max, Felt::ONE);
+        }
+
+        #[test]
+        fn add_sub_inverse() {
+            let a = Felt::from_u64(12345);
+            let b = Felt::from_u64(67890);
+            assert_eq!((a + b) - b, a);
+            assert_eq!((a - b) + b, a);
         }
     }
 
