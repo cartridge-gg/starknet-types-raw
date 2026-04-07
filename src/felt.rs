@@ -450,38 +450,102 @@ fn ge_modulus(limbs: &[u64; 4]) -> bool {
     true // equal
 }
 
-impl TryInto<u128> for Felt {
+impl TryFrom<Felt> for u128 {
     type Error = PrimitiveFromFeltError;
 
-    fn try_into(self) -> Result<u128, Self::Error> {
-        let initial_zeroes = self.0.iter().take_while(|b| **b == 0).count();
+    fn try_from(felt: Felt) -> Result<u128, Self::Error> {
+        let initial_zeroes = felt.0.iter().take_while(|b| **b == 0).count();
         const EXPECTED_ZEROES: usize = (32 - u128::BITS / u8::BITS) as usize;
 
         if initial_zeroes < EXPECTED_ZEROES {
             return Err(PrimitiveFromFeltError);
         }
 
-        let bytes = self.0[EXPECTED_ZEROES..]
+        let bytes = felt.0[EXPECTED_ZEROES..]
             .try_into()
             .expect("Should match u128 size");
         Ok(u128::from_be_bytes(bytes))
     }
 }
 
-impl TryInto<u64> for Felt {
+impl TryFrom<Felt> for u64 {
     type Error = PrimitiveFromFeltError;
 
-    fn try_into(self) -> Result<u64, Self::Error> {
-        let initial_zeroes = self.0.iter().take_while(|b| **b == 0).count();
+    fn try_from(felt: Felt) -> Result<u64, Self::Error> {
+        let initial_zeroes = felt.0.iter().take_while(|b| **b == 0).count();
         const EXPECTED_ZEROES: usize = (32 - u64::BITS / u8::BITS) as usize;
 
         if initial_zeroes < EXPECTED_ZEROES {
             return Err(PrimitiveFromFeltError);
         }
-        let bytes = self.0[EXPECTED_ZEROES..]
+        let bytes = felt.0[EXPECTED_ZEROES..]
             .try_into()
             .expect("Should match u64 size");
         Ok(u64::from_be_bytes(bytes))
+    }
+}
+
+impl TryFrom<Felt> for i128 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<i128, Self::Error> {
+        // Positive: fits in u128 and within i128 range
+        if let Ok(v) = u128::try_from(felt) {
+            if v <= i128::MAX as u128 {
+                return Ok(v as i128);
+            }
+            return Err(PrimitiveFromFeltError);
+        }
+
+        // Negative: negate to get absolute value, then check range
+        let abs = u128::try_from(-felt).map_err(|_| PrimitiveFromFeltError)?;
+        if abs <= i128::MAX as u128 {
+            Ok(-(abs as i128))
+        } else if abs == i128::MIN.unsigned_abs() {
+            Ok(i128::MIN)
+        } else {
+            Err(PrimitiveFromFeltError)
+        }
+    }
+}
+
+impl TryFrom<Felt> for i64 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<i64, Self::Error> {
+        i128::try_from(felt)?
+            .try_into()
+            .map_err(|_| PrimitiveFromFeltError)
+    }
+}
+
+impl TryFrom<Felt> for i32 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<i32, Self::Error> {
+        i128::try_from(felt)?
+            .try_into()
+            .map_err(|_| PrimitiveFromFeltError)
+    }
+}
+
+impl TryFrom<Felt> for i16 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<i16, Self::Error> {
+        i128::try_from(felt)?
+            .try_into()
+            .map_err(|_| PrimitiveFromFeltError)
+    }
+}
+
+impl TryFrom<Felt> for i8 {
+    type Error = PrimitiveFromFeltError;
+
+    fn try_from(felt: Felt) -> Result<i8, Self::Error> {
+        i128::try_from(felt)?
+            .try_into()
+            .map_err(|_| PrimitiveFromFeltError)
     }
 }
 
