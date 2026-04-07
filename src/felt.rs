@@ -1643,7 +1643,7 @@ mod tests {
         }
     }
 
-    mod to_short_ascii_str {
+    mod as_short_ascii_str {
         use assert_matches::assert_matches;
         use pretty_assertions_sorted::assert_eq;
         use starknet::core::utils::parse_cairo_short_string;
