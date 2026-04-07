@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::error::Error;
 
+use crate::keccak::keccak256;
+
 /// Starknet Field Element.
 ///
 /// A field element is a number 0..p-1 with p=2^{251}+17*2^{192}+1, and it forms
@@ -213,6 +215,16 @@ impl Felt {
             Self::from_be_slice(&u.to_be_bytes()),
             "128 bits is less than 251 bits"
         )
+    }
+
+    /// Computes a Starknet selector from a function/event name.
+    ///
+    /// This is `keccak256(name)` with the top 6 bits cleared, matching
+    /// `starknet::core::utils::get_selector_from_name`.
+    pub const fn selector(name: &str) -> Self {
+        let mut hash = keccak256(name.as_bytes());
+        hash[0] &= 0b0000_0011;
+        Felt(hash)
     }
 }
 
@@ -902,6 +914,63 @@ mod tests {
             .unwrap();
             let b = Felt::ONE;
             assert_add_matches(a, b);
+        }
+    }
+
+    mod selector {
+        use super::Felt;
+        use starknet::core::utils::starknet_keccak;
+
+        fn assert_selector_matches(name: &str) {
+            let ours = Felt::selector(name);
+            let reference = starknet_keccak(name.as_bytes());
+            assert_eq!(
+                ours.0,
+                reference.to_bytes_be(),
+                "selector mismatch for {name:?}"
+            );
+        }
+
+        #[test]
+        fn transfer() {
+            assert_selector_matches("Transfer");
+        }
+
+        #[test]
+        fn transfer_from() {
+            assert_selector_matches("transferFrom");
+        }
+
+        #[test]
+        fn approve() {
+            assert_selector_matches("Approval");
+        }
+
+        #[test]
+        fn balance_of() {
+            assert_selector_matches("balanceOf");
+        }
+
+        #[test]
+        fn long_name() {
+            assert_selector_matches("some_really_long_function_name_that_exceeds_31_bytes_easily");
+        }
+
+        #[test]
+        fn single_char() {
+            assert_selector_matches("a");
+        }
+
+        #[test]
+        fn empty() {
+            assert_selector_matches("");
+        }
+
+        #[test]
+        fn const_eval() {
+            const TRANSFER: Felt = Felt::selector("Transfer");
+            assert_selector_matches("Transfer");
+            assert_eq!(TRANSFER, Felt::selector("Transfer"));
         }
     }
 }

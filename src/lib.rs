@@ -1,5 +1,6 @@
 pub mod event;
 pub mod felt;
+mod keccak;
 
 #[cfg(feature = "serde")]
 pub mod serde;
