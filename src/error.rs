@@ -20,6 +20,7 @@ pub enum FromStrError {
     InvalidLength { max: usize, actual: usize },
     Overflow,
     EmptyString,
+    NonAsciiCharacter,
 }
 
 impl Error for FromStrError {}
@@ -40,6 +41,7 @@ impl std::fmt::Display for FromStrError {
             }
             Self::Overflow => f.write_str(OVERFLOW_MSG),
             Self::EmptyString => f.write_str("empty string"),
+            Self::NonAsciiCharacter => f.write_str("non-ASCII character in short string"),
         }
     }
 }

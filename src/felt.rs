@@ -396,6 +396,48 @@ impl Felt {
         Felt(hash)
     }
 
+    pub const fn from_short_ascii_str(s: &str) -> Result<Self, FromStrError> {
+        let bytes = s.as_bytes();
+        if bytes.len() > 31 {
+            return Err(FromStrError::InvalidLength {
+                max: 31,
+                actual: bytes.len(),
+            });
+        }
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] > 127 {
+                return Err(FromStrError::NonAsciiCharacter);
+            }
+            i += 1;
+        }
+        let mut buf = [0u8; 32];
+        let offset = 32 - bytes.len();
+        i = 0;
+        while i < bytes.len() {
+            buf[offset + i] = bytes[i];
+            i += 1;
+        }
+        Ok(Self(buf))
+    }
+
+    /// Like [`from_short_ascii_str`](Self::from_short_ascii_str) but without
+    /// length or ASCII validation. The caller must ensure `s.len() <= 31`
+    /// and all bytes are ASCII.
+    pub const fn from_short_ascii_str_unchecked(s: &str) -> Self {
+        let bytes = s.as_bytes();
+        debug_assert!(bytes.len() <= 31);
+        let mut buf = [0u8; 32];
+        let offset = 32 - bytes.len();
+        let mut i = 0;
+        while i < bytes.len() {
+            debug_assert!(bytes[i] <= 127);
+            buf[offset + i] = bytes[i];
+            i += 1;
+        }
+        Self(buf)
+    }
+
     pub fn to_fixed_hex_string(&self) -> String {
         let mut buf = [0u8; 64];
         self.0.iter().enumerate().for_each(|(i, &b)| {
@@ -1471,6 +1513,93 @@ mod tests {
         fn zero_decimal() {
             let felt: Felt = "0".parse().unwrap();
             assert_eq!(felt, Felt::ZERO);
+        }
+    }
+
+    mod from_short_ascii_str {
+        use assert_matches::assert_matches;
+        use pretty_assertions_sorted::assert_eq;
+        use starknet::core::utils::cairo_short_string_to_felt;
+
+        use super::*;
+
+        fn assert_matches_reference(s: &str) {
+            let ours = Felt::from_short_ascii_str(s).unwrap();
+            let reference = cairo_short_string_to_felt(s).unwrap();
+            assert_eq!(ours.0, reference.to_bytes_be(), "mismatch for {s:?}");
+        }
+
+        #[test]
+        fn empty() {
+            assert_matches_reference("");
+        }
+
+        #[test]
+        fn single_char() {
+            assert_matches_reference("a");
+        }
+
+        #[test]
+        fn hello() {
+            assert_matches_reference("hello");
+        }
+
+        #[test]
+        fn max_length() {
+            assert_matches_reference("1234567890123456789012345678901");
+        }
+
+        #[test]
+        fn too_long() {
+            assert_matches!(
+                Felt::from_short_ascii_str("12345678901234567890123456789012").unwrap_err(),
+                FromStrError::InvalidLength { max: 31, actual: 32 }
+            );
+        }
+
+        #[test]
+        fn digits() {
+            assert_matches_reference("0123456789");
+        }
+
+        #[test]
+        fn special_ascii() {
+            assert_matches_reference("!@#$%^&*()");
+        }
+
+        #[test]
+        fn spaces() {
+            assert_matches_reference("hello world");
+        }
+
+        #[test]
+        fn non_ascii_rejected() {
+            assert_matches!(
+                Felt::from_short_ascii_str("café").unwrap_err(),
+                FromStrError::NonAsciiCharacter
+            );
+        }
+
+        #[test]
+        fn unchecked_matches() {
+            let s = "Transfer";
+            let checked = Felt::from_short_ascii_str(s).unwrap();
+            let unchecked = Felt::from_short_ascii_str_unchecked(s);
+            assert_eq!(checked, unchecked);
+        }
+
+        #[test]
+        fn unchecked_empty() {
+            assert_eq!(Felt::from_short_ascii_str_unchecked(""), Felt::ZERO);
+        }
+
+        #[test]
+        fn const_eval() {
+            const TRANSFER: Felt = Felt::from_short_ascii_str_unchecked("Transfer");
+            assert_eq!(
+                TRANSFER,
+                Felt::from_short_ascii_str("Transfer").unwrap()
+            );
         }
     }
 }
